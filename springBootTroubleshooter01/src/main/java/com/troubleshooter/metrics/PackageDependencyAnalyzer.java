@@ -13,11 +13,11 @@ public class PackageDependencyAnalyzer {
 
     public Map<String, Set<String>> analyze(JavaClasses classes) {
     	
+    	System.out.println("Loaded classes: " + classes.size());
     	String BASE_PACKAGE = classes.stream()
-                .findFirst()
-                .get()
-                .getPackageName()
-                .split("\\.")[0];
+    	        .map(c -> c.getPackageName())
+    	        .min(String::compareTo)
+    	        .orElseThrow(() -> new RuntimeException("No classes found"));
 
         Map<String, Set<String>> dependencies = new HashMap<>();
 

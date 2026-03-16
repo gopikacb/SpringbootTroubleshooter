@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Architecture Health Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: Arial; margin: 40px; }
+table { border-collapse: collapse; width: 70%; }
+th, td { border:1px solid #ddd; padding:8px; }
+th { background-color:#f2f2f2; }
+canvas { margin-top:40px; }
+</style>
+</head>
+<body>
+<h1>Architecture Health Report</h1><h2>Architecture Health Score: 47/100</h2><h2>Component Metrics</h2><table><tr><th>Component</th><th>Ca</th><th>Ce</th><th>Instability</th><th>Abstractness</th><th>Distance</th></tr><tr><td>com.sbt.sbtTest.repository</td><td>2</td><td>1</td><td>0.33</td><td>0.00</td><td>0.67</td></tr><tr><td>com.sbt.sbtTest.controller</td><td>0</td><td>2</td><td>1.00</td><td>0.00</td><td>0.00</td></tr><tr><td>com.sbt.sbtTest.model</td><td>3</td><td>0</td><td>0.00</td><td>0.00</td><td>1.00</td></tr><tr><td>com.sbt.sbtTest</td><td>0</td><td>0</td><td>0.00</td><td>0.00</td><td>1.00</td></tr><tr><td>com.sbt.sbtTest.service</td><td>0</td><td>2</td><td>1.00</td><td>0.00</td><td>0.00</td></tr></table><h2>Architecture Metrics Graph (Abstractness vs Instability)</h2>
+<canvas id="chart" width="900" height="450"></canvas>
+<script>
+const ctx = document.getElementById('chart');
+new Chart(ctx,{type:'scatter',data:{datasets:[{label:'com.sbt.sbtTest.repository',data:[{x:0.3333333333333333,y:0.0}],backgroundColor:'red',pointRadius:8},{label:'com.sbt.sbtTest.controller',data:[{x:1.0,y:0.0}],backgroundColor:'blue',pointRadius:8},{label:'com.sbt.sbtTest.model',data:[{x:0.0,y:0.0}],backgroundColor:'green',pointRadius:8},{label:'com.sbt.sbtTest',data:[{x:0.0,y:0.0}],backgroundColor:'orange',pointRadius:8},{label:'com.sbt.sbtTest.service',data:[{x:1.0,y:0.0}],backgroundColor:'purple',pointRadius:8},{label:'Main Sequence',type:'line',data:[{x:0,y:1},{x:1,y:0}],borderColor:'black',borderDash:[5,5],fill:false}]},options:{scales:{x:{min:0,max:1,title:{display:true,text:'Instability'}},y:{min:0,max:1,title:{display:true,text:'Abstractness'}}}}});
+</script>
+<h2>AST Analysis</h2><h3>UserController</h3><ul><li>Layer: Controller</li><li>Field Injection detected</li><li>Method: getUser | Complexity: 1</li><li style='color:red'>Code Smell: Field Injection detected (prefer constructor injection)</li></ul><h3>User</h3><ul><li>Method: getName | Complexity: 1</li><li>Method: getId | Complexity: 1</li></ul><h3>UserRepository</h3><ul><li>Layer: Repository</li><li>Method: findUser | Complexity: 1</li></ul><h3>SbtTestApplication</h3><ul><li>Method: main | Complexity: 1</li></ul><h3>UserService</h3><ul><li>Layer: Service</li><li>Field Injection detected</li><li>Method: getUser | Complexity: 1</li><li style='color:red'>Code Smell: Field Injection detected (prefer constructor injection)</li></ul></body>
+</html>

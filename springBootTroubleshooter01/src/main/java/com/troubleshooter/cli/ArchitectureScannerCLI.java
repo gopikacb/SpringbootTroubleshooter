@@ -1,12 +1,16 @@
 package com.troubleshooter.cli;
 
 import com.troubleshooter.analyzer.ArchitectureAnalyzer;
+import com.troubleshooter.ast.ASTAnalyzer;
+import com.troubleshooter.ast.ASTConsolePrinter;
+import com.troubleshooter.ast.ASTResult;
 import com.troubleshooter.engine.RuleEngine;
 import com.troubleshooter.rules.AnnotationLayerRule;
 import com.troubleshooter.rules.ControllerRepositoryRule;
 import com.troubleshooter.rules.LayerArchitectureRule;
 import com.troubleshooter.rules.CycleDependencyRule;
 import com.troubleshooter.report.ArchitectureReport;
+import com.troubleshooter.report.HtmlReportGenerator;
 import com.troubleshooter.metrics.ArchitectureCommentGenerator;
 import com.troubleshooter.metrics.ArchitectureHealthCalculator;
 import com.troubleshooter.metrics.ArchitectureMetrics;
@@ -24,7 +28,7 @@ import java.util.Set;
 
 public class ArchitectureScannerCLI {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
 
         if (args.length == 0) {
             System.out.println("Usage: java -jar tool.jar <base-package>");
@@ -105,6 +109,41 @@ public class ArchitectureScannerCLI {
                 new ArchitectureCommentGenerator();
 
         commentGenerator.generateComments(metrics, healthScore);
+        
+        
+        
+        
+        System.out.println("\n--AST----------------------------------------------------------------------------------------");
+
+        
+        
+        ASTAnalyzer astAnalyzer = new ASTAnalyzer();
+        
+        
+        String classesPath = args[0];
+
+        String sourceCodePath = classesPath
+                .replace("target/classes", "src/main/java")
+                .replace("target\\classes", "src\\main\\java");
+
+
+        System.out.println("Source path detected: " + sourceCodePath);
+        List<ASTResult> astResults =
+                astAnalyzer.analyzeSource(sourceCodePath);
+
+        ASTConsolePrinter printer = new ASTConsolePrinter();
+
+        printer.printResults(astResults);
+        
+        ArchitectureHealthCalculator health =
+                new ArchitectureHealthCalculator();
+
+        int astScore = health.calculateScore(metrics);
+
+        HtmlReportGenerator reportHtml =
+                new HtmlReportGenerator();
+
+        reportHtml.generateReport(metrics, astResults, astScore);
 
     }
 }
