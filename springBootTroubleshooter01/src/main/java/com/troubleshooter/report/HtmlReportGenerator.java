@@ -224,6 +224,27 @@ public class HtmlReportGenerator {
 
 				html.append("</ul>");
 			}
+			
+			
+			if (r.valueMisuses != null && !r.valueMisuses.isEmpty()) {
+
+			    html.append("<li><b>@Value Misuse (Non-Spring Bean):</b></li>");
+			    html.append("<ul>");
+
+			    r.valueMisuses.forEach(m -> {
+
+			        html.append("<li style='color:orange'>")
+			                .append(m.getClassName())
+			                .append(".")
+			                .append(m.getFieldName())
+			                .append(" (line ")
+			                .append(m.getLineNumber())
+			                .append(") → @Value will NOT be injected")
+			                .append("</li>");
+			    });
+
+			    html.append("</ul>");
+			}
 
 			html.append("</ul>");
 		}

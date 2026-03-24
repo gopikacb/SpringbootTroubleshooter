@@ -20,4 +20,6 @@ public class ASTResult {
     
     public List<MissingProperty> missingProperties = new ArrayList<>();
     
+    public List<ValueMisuse> valueMisuses = new ArrayList<>();
+    
 }

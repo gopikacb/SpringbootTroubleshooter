@@ -97,61 +97,104 @@ public class ASTAnalyzer {
 		});
 	}
 
-	private void detectValueAnnotations(ClassOrInterfaceDeclaration clazz, ASTResult result,
-			Set<String> availableProperties) {
+	private void detectValueAnnotations(ClassOrInterfaceDeclaration clazz,
+                                    ASTResult result,
+                                    Set<String> availableProperties) {
 
-		clazz.findAll(FieldDeclaration.class).forEach(field -> {
+    boolean isSpringBean = result.layer != null;
 
-			field.getAnnotations().forEach(annotation -> {
+    clazz.findAll(FieldDeclaration.class).forEach(field -> {
 
-				if (annotation.getNameAsString().equals("Value")) {
+        field.getAnnotations().forEach(annotation -> {
 
-					String expression = annotation.toString();
-					String key = extractPropertyKey(expression);
+            if (annotation.getNameAsString().equals("Value")) {
 
-					if (key != null && !availableProperties.contains(key)) {
+                String fieldName = field.getVariables().get(0).getNameAsString();
+                int line = annotation.getBegin().map(p -> p.line).orElse(-1);
 
-						String fieldName = field.getVariables().get(0).getNameAsString();
+                /* 🔥 CASE 1: NON-SPRING BEAN (MISUSE) */
 
-						int line = annotation.getBegin().map(p -> p.line).orElse(-1);
+                if (!isSpringBean) {
 
-						result.missingProperties.add(new MissingProperty(result.className, fieldName, line, key));
+                    result.valueMisuses.add(
+                            new ValueMisuse(result.className, fieldName, line)
+                    );
 
-						System.out.println("Missing @Value: " + result.className + "." + fieldName + " (line " + line
-								+ ") -> " + key);
-					}
-				}
-			});
-		});
+                    System.out.println("⚠ @Value misuse: "
+                            + result.className + "." + fieldName
+                            + " (line " + line + ")");
 
-		/* Constructor params */
+                    return;
+                }
 
-		clazz.getConstructors().forEach(constructor -> {
+                /* 🔥 CASE 2: SPRING BEAN → VALIDATE PROPERTY */
 
-			constructor.getParameters().forEach(param -> {
+                String expression = annotation.toString();
+                String key = extractPropertyKey(expression);
 
-				param.getAnnotations().forEach(annotation -> {
+                if (key != null && !availableProperties.contains(key)) {
 
-					if (annotation.getNameAsString().equals("Value")) {
+                    result.missingProperties.add(
+                            new MissingProperty(
+                                    result.className,
+                                    fieldName,
+                                    line,
+                                    key
+                            )
+                    );
 
-						String expression = annotation.toString();
-						String key = extractPropertyKey(expression);
+                    System.out.println("Missing @Value: "
+                            + result.className + "." + fieldName
+                            + " (line " + line + ") -> " + key);
+                }
+            }
+        });
+    });
 
-						if (key != null && !availableProperties.contains(key)) {
+    /* Constructor params */
 
-							int line = annotation.getBegin().map(p -> p.line).orElse(-1);
+    clazz.getConstructors().forEach(constructor -> {
 
-							result.missingProperties
-									.add(new MissingProperty(result.className, param.getNameAsString(), line, key));
+        constructor.getParameters().forEach(param -> {
 
-							System.out.println("Missing @Value: " + result.className + "." + param.getNameAsString()
-									+ " (line " + line + ") -> " + key);
-						}
-					}
-				});
-			});
-		});
-	}
+            param.getAnnotations().forEach(annotation -> {
+
+                if (annotation.getNameAsString().equals("Value")) {
+
+                    int line = annotation.getBegin().map(p -> p.line).orElse(-1);
+
+                    if (!isSpringBean) {
+
+                        result.valueMisuses.add(
+                                new ValueMisuse(
+                                        result.className,
+                                        param.getNameAsString(),
+                                        line
+                                )
+                        );
+
+                        return;
+                    }
+
+                    String expression = annotation.toString();
+                    String key = extractPropertyKey(expression);
+
+                    if (key != null && !availableProperties.contains(key)) {
+
+                        result.missingProperties.add(
+                                new MissingProperty(
+                                        result.className,
+                                        param.getNameAsString(),
+                                        line,
+                                        key
+                                )
+                        );
+                    }
+                }
+            });
+        });
+    });
+}
 	
 	
 	private String extractPropertyKey(String expression) {
