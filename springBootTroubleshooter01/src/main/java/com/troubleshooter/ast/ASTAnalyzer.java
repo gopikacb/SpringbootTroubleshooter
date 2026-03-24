@@ -12,175 +12,242 @@ import java.util.*;
 
 public class ASTAnalyzer {
 
-    public List<ASTResult> analyzeSource(String sourcePath) throws Exception {
+	public List<ASTResult> analyzeSource(String sourcePath, Set<String> availableProperties) throws Exception {
 
-        List<ASTResult> results = new ArrayList<>();
+		List<ASTResult> results = new ArrayList<>();
 
-        File sourceDir = new File(sourcePath);
+		File sourceDir = new File(sourcePath);
 
-        System.out.println("Scanning source directory: " + sourcePath);
+		System.out.println("Scanning source directory: " + sourcePath);
 
-        Files.walk(sourceDir.toPath())
-                .filter(path -> path.toString().endsWith(".java"))
-                .forEach(path -> {
+		Files.walk(sourceDir.toPath()).filter(path -> path.toString().endsWith(".java")).forEach(path -> {
 
-                    try {
+			try {
 
-                        System.out.println("Parsing file: " + path);
+				CompilationUnit cu = StaticJavaParser.parse(path);
 
-                        CompilationUnit cu = StaticJavaParser.parse(path);
+				cu.findAll(ClassOrInterfaceDeclaration.class)
+						.forEach(clazz -> results.add(analyzeClass(clazz, availableProperties)));
 
-                        cu.findAll(ClassOrInterfaceDeclaration.class)
-                                .forEach(clazz -> results.add(analyzeClass(clazz)));
+			} catch (Exception e) {
 
-                    } catch (Exception e) {
+				System.out.println("Error parsing file: " + path);
+				e.printStackTrace();
+			}
 
-                        System.out.println("Error parsing file: " + path);
-                        e.printStackTrace();
-                    }
+		});
 
-                });
+		System.out.println("AST Classes analyzed: " + results.size());
 
-        System.out.println("AST Classes analyzed: " + results.size());
+		return results;
+	}
 
-        return results;
-    }
+	private ASTResult analyzeClass(ClassOrInterfaceDeclaration clazz, Set<String> availableProperties) {
 
-    private ASTResult analyzeClass(ClassOrInterfaceDeclaration clazz) {
+		ASTResult result = new ASTResult();
 
-        ASTResult result = new ASTResult();
+		result.className = clazz.getNameAsString();
 
-        result.className = clazz.getNameAsString();
+		detectLayer(clazz, result);
 
-        detectLayer(clazz, result);
+		boolean isSpringComponent = result.layer != null;
 
-        boolean isSpringComponent = result.layer != null;
+		if (isSpringComponent) {
+			detectInjection(clazz, result);
+		}
 
-        if (isSpringComponent) {
-            detectInjection(clazz, result);
-        }
+		analyzeMethods(clazz, result);
 
-        analyzeMethods(clazz, result);
+		detectAnnotations(clazz, result);
 
-        detectAnnotations(clazz, result);
+		detectCodeSmells(clazz, result);
+		
+		detectValueAnnotations(clazz, result, availableProperties);
 
-        detectCodeSmells(clazz, result);
+		return result;
+	}
 
-        return result;
-    }
+	/* Detect Spring Layers */
 
-    /* Detect Spring Layers */
+	private void detectLayer(ClassOrInterfaceDeclaration clazz, ASTResult result) {
 
-    private void detectLayer(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+		clazz.getAnnotations().forEach(annotation -> {
 
-        clazz.getAnnotations().forEach(annotation -> {
+			String name = annotation.getNameAsString();
 
-            String name = annotation.getNameAsString();
+			switch (name) {
 
-            switch (name) {
+			case "RestController":
+				result.layer = "Controller";
+				break;
 
-                case "RestController":
-                    result.layer = "Controller";
-                    break;
+			case "Service":
+				result.layer = "Service";
+				break;
 
-                case "Service":
-                    result.layer = "Service";
-                    break;
+			case "Repository":
+				result.layer = "Repository";
+				break;
 
-                case "Repository":
-                    result.layer = "Repository";
-                    break;
+			case "Component":
+				result.layer = "Component";
+				break;
+			}
 
-                case "Component":
-                    result.layer = "Component";
-                    break;
-            }
+		});
+	}
 
-        });
-    }
+	private void detectValueAnnotations(ClassOrInterfaceDeclaration clazz, ASTResult result,
+			Set<String> availableProperties) {
 
-    /* Injection Detection */
+		clazz.findAll(FieldDeclaration.class).forEach(field -> {
 
-    private void detectInjection(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+			field.getAnnotations().forEach(annotation -> {
 
-        clazz.findAll(FieldDeclaration.class)
-                .forEach(field -> {
+				if (annotation.getNameAsString().equals("Value")) {
 
-                    field.getAnnotations()
-                            .forEach(annotation -> {
+					String expression = annotation.toString();
+					String key = extractPropertyKey(expression);
 
-                                if (annotation.getNameAsString().equals("Autowired")) {
-                                    result.fieldInjection = true;
-                                }
+					if (key != null && !availableProperties.contains(key)) {
 
-                            });
+						String fieldName = field.getVariables().get(0).getNameAsString();
 
-                });
+						int line = annotation.getBegin().map(p -> p.line).orElse(-1);
 
-        clazz.getConstructors().forEach(constructor -> {
+						result.missingProperties.add(new MissingProperty(result.className, fieldName, line, key));
 
-            if (constructor.getParameters().size() > 0) {
-                result.constructorInjection = true;
-            }
+						System.out.println("Missing @Value: " + result.className + "." + fieldName + " (line " + line
+								+ ") -> " + key);
+					}
+				}
+			});
+		});
 
-        });
-    }
+		/* Constructor params */
 
-    /* Method Analysis */
+		clazz.getConstructors().forEach(constructor -> {
 
-    private void analyzeMethods(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+			constructor.getParameters().forEach(param -> {
 
-        clazz.findAll(MethodDeclaration.class)
-                .forEach(method -> {
+				param.getAnnotations().forEach(annotation -> {
 
-                    int complexity =
-                            method.findAll(IfStmt.class).size()
-                                    + method.findAll(ForStmt.class).size()
-                                    + method.findAll(WhileStmt.class).size()
-                                    + method.findAll(SwitchStmt.class).size()
-                                    + method.findAll(CatchClause.class).size()
-                                    + 1;
+					if (annotation.getNameAsString().equals("Value")) {
 
-                    result.methodComplexity.put(
-                            method.getNameAsString(),
-                            complexity
-                    );
+						String expression = annotation.toString();
+						String key = extractPropertyKey(expression);
 
-                });
-    }
+						if (key != null && !availableProperties.contains(key)) {
 
-    /* Custom Annotation Processing */
+							int line = annotation.getBegin().map(p -> p.line).orElse(-1);
 
-    private void detectAnnotations(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+							result.missingProperties
+									.add(new MissingProperty(result.className, param.getNameAsString(), line, key));
 
-        clazz.findAll(AnnotationExpr.class)
-                .forEach(annotation -> {
+							System.out.println("Missing @Value: " + result.className + "." + param.getNameAsString()
+									+ " (line " + line + ") -> " + key);
+						}
+					}
+				});
+			});
+		});
+	}
+	
+	
+	private String extractPropertyKey(String expression) {
 
-                    result.annotations.add(annotation.getNameAsString());
+	    if (expression == null) return null;
 
-                });
-    }
+	    if (expression.contains("${") && expression.contains("}")) {
 
-    /* Code Smell Detection */
+	        int start = expression.indexOf("${") + 2;
+	        int end = expression.indexOf("}");
 
-    private void detectCodeSmells(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+	        String inner = expression.substring(start, end);
 
-        int methodCount = clazz.getMethods().size();
+	        int colonIndex = inner.indexOf(":");
 
-        if (methodCount > 20) {
-            result.codeSmells.add("God Class (too many methods)");
-        }
+	        if (colonIndex != -1) {
+	            return inner.substring(0, colonIndex);
+	        }
 
-        result.methodComplexity.forEach((method, complexity) -> {
+	        return inner;
+	    }
 
-            if (complexity > 10) {
-                result.codeSmells.add("High complexity method: " + method);
-            }
+	    return null;
+	}
 
-        });
+	/* Injection Detection */
 
-        if (result.fieldInjection) {
-            result.codeSmells.add("Field Injection detected (prefer constructor injection)");
-        }
-    }
+	private void detectInjection(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+
+		clazz.findAll(FieldDeclaration.class).forEach(field -> {
+
+			field.getAnnotations().forEach(annotation -> {
+
+				if (annotation.getNameAsString().equals("Autowired")) {
+					result.fieldInjection = true;
+				}
+
+			});
+
+		});
+
+		clazz.getConstructors().forEach(constructor -> {
+
+			if (constructor.getParameters().size() > 0) {
+				result.constructorInjection = true;
+			}
+
+		});
+	}
+
+	/* Method Analysis */
+
+	private void analyzeMethods(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+
+		clazz.findAll(MethodDeclaration.class).forEach(method -> {
+
+			int complexity = method.findAll(IfStmt.class).size() + method.findAll(ForStmt.class).size()
+					+ method.findAll(WhileStmt.class).size() + method.findAll(SwitchStmt.class).size()
+					+ method.findAll(CatchClause.class).size() + 1;
+
+			result.methodComplexity.put(method.getNameAsString(), complexity);
+
+		});
+	}
+
+	/* Custom Annotation Processing */
+
+	private void detectAnnotations(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+
+		clazz.findAll(AnnotationExpr.class).forEach(annotation -> {
+
+			result.annotations.add(annotation.getNameAsString());
+
+		});
+	}
+
+	/* Code Smell Detection */
+
+	private void detectCodeSmells(ClassOrInterfaceDeclaration clazz, ASTResult result) {
+
+		int methodCount = clazz.getMethods().size();
+
+		if (methodCount > 20) {
+			result.codeSmells.add("God Class (too many methods)");
+		}
+
+		result.methodComplexity.forEach((method, complexity) -> {
+
+			if (complexity > 10) {
+				result.codeSmells.add("High complexity method: " + method);
+			}
+
+		});
+
+		if (result.fieldInjection) {
+			result.codeSmells.add("Field Injection detected (prefer constructor injection)");
+		}
+	}
 }

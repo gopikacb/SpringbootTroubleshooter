@@ -17,4 +17,7 @@ public class ASTResult {
     public List<String> annotations = new ArrayList<>();
 
     public List<String> codeSmells = new ArrayList<>();
+    
+    public List<MissingProperty> missingProperties = new ArrayList<>();
+    
 }

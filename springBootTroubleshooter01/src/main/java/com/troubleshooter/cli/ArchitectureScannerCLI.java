@@ -4,19 +4,21 @@ import com.troubleshooter.analyzer.ArchitectureAnalyzer;
 import com.troubleshooter.ast.ASTAnalyzer;
 import com.troubleshooter.ast.ASTConsolePrinter;
 import com.troubleshooter.ast.ASTResult;
+import com.troubleshooter.config.PropertyLoader;
 import com.troubleshooter.engine.RuleEngine;
 import com.troubleshooter.rules.AnnotationLayerRule;
-import com.troubleshooter.rules.ControllerRepositoryRule;
 import com.troubleshooter.rules.LayerArchitectureRule;
 import com.troubleshooter.rules.CycleDependencyRule;
 import com.troubleshooter.report.ArchitectureReport;
+import com.troubleshooter.report.ArchitectureReportPrinter;
 import com.troubleshooter.report.HtmlReportGenerator;
+import com.troubleshooter.metrics.AnalysisIssue;
 import com.troubleshooter.metrics.ArchitectureCommentGenerator;
 import com.troubleshooter.metrics.ArchitectureHealthCalculator;
 import com.troubleshooter.metrics.ArchitectureMetrics;
 import com.troubleshooter.metrics.ComponentMetrics;
 import com.troubleshooter.metrics.ComponentMetricsCalculator;
-import com.troubleshooter.metrics.MetricsGraphPrinter;
+//import com.troubleshooter.metrics.MetricsGraphPrinter;
 import com.troubleshooter.metrics.PackageDependencyAnalyzer;
 import com.tngtech.archunit.core.domain.JavaClasses;
 
@@ -35,7 +37,7 @@ public class ArchitectureScannerCLI {
             return;
         }
 
-//        String basePackage = args[0];
+        String projectPath = args[0];
 
         ArchitectureAnalyzer analyzer = new ArchitectureAnalyzer();
 
@@ -43,7 +45,6 @@ public class ArchitectureScannerCLI {
         
         RuleEngine engine = new RuleEngine(
         		Arrays.asList(
-        		        new ControllerRepositoryRule(),
         		        new LayerArchitectureRule(),
         		        new CycleDependencyRule(),
         		        new AnnotationLayerRule()
@@ -52,8 +53,10 @@ public class ArchitectureScannerCLI {
 
         ArchitectureReport report = engine.execute(classes);
 
-        report.printReport();
+//        report.printReport();
 
+        
+        // score -= violations * 5
         int score = ArchitectureMetrics.calculateScore(report.getViolationCount());
 
         System.out.println("\nArchitecture Score: " + score + "/100");
@@ -100,16 +103,14 @@ public class ArchitectureScannerCLI {
 
         int healthScore = healthCalculator.calculateScore(metrics);
 
-        MetricsGraphPrinter graphPrinter =
-                new MetricsGraphPrinter();
 
-        graphPrinter.printGraph(metrics);
-
-        ArchitectureCommentGenerator commentGenerator =
-                new ArchitectureCommentGenerator();
-
-        commentGenerator.generateComments(metrics, healthScore);
         
+        
+        ArchitectureCommentGenerator commentAnalyzer = new ArchitectureCommentGenerator();
+        List<AnalysisIssue> issues = commentAnalyzer.analyze(metrics);
+
+        ArchitectureReportPrinter printer = new ArchitectureReportPrinter();
+        printer.print(issues, healthScore);
         
         
         
@@ -128,22 +129,29 @@ public class ArchitectureScannerCLI {
 
 
         System.out.println("Source path detected: " + sourceCodePath);
+        
+        Set<String> properties =
+                PropertyLoader.loadProperties(projectPath + "/src/main/resources");
+
         List<ASTResult> astResults =
-                astAnalyzer.analyzeSource(sourceCodePath);
+                astAnalyzer.analyzeSource(sourceCodePath, properties);
 
-        ASTConsolePrinter printer = new ASTConsolePrinter();
+        ASTConsolePrinter astPrinter = new ASTConsolePrinter();
 
-        printer.printResults(astResults);
+        astPrinter.printResults(astResults);
         
         ArchitectureHealthCalculator health =
                 new ArchitectureHealthCalculator();
 
         int astScore = health.calculateScore(metrics);
+                
+       
+        
 
         HtmlReportGenerator reportHtml =
                 new HtmlReportGenerator();
 
-        reportHtml.generateReport(metrics, astResults, astScore);
+        reportHtml.generateReport(metrics, astResults,issues, astScore);
 
     }
 }

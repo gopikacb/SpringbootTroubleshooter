@@ -13,7 +13,7 @@ public class ArchitectureAnalyzer {
                 new ClassFileImporter()
                         .importPath(Paths.get(path));
 
-        System.out.println("Loaded classes: " + classes.size());
+        System.out.println("Loaded classes: " + classes.size() +"\n");
 
         return classes;
     }

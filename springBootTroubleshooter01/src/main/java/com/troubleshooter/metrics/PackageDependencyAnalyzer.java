@@ -14,6 +14,7 @@ public class PackageDependencyAnalyzer {
     public Map<String, Set<String>> analyze(JavaClasses classes) {
     	
     	System.out.println("Loaded classes: " + classes.size());
+    	
     	String BASE_PACKAGE = classes.stream()
     	        .map(c -> c.getPackageName())
     	        .min(String::compareTo)
