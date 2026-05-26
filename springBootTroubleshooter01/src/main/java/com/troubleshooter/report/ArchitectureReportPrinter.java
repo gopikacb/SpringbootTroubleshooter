@@ -12,14 +12,12 @@ public class ArchitectureReportPrinter {
         System.out.println("==================================================");
 
         for (AnalysisIssue issue : issues) {
-
             System.out.println("\n--------------------------------------------------");
             System.out.println("Component : " + issue.getComponentName());
             System.out.println("Issue     : " + issue.getIssueType());
             System.out.println("Severity  : " + issue.getSeverity());
 
-            System.out.println(String.format(
-                    "Metrics   : Instability=%.2f | Abstractness=%.2f | Distance=%.2f",
+            System.out.println(String.format("Metrics   : Instability=%.2f | Abstractness=%.2f | Distance=%.2f",
                     issue.getInstability(),
                     issue.getAbstractness(),
                     issue.getDistance()));

@@ -15,278 +15,234 @@ public class ASTAnalyzer {
 	public List<ASTResult> analyzeSource(String sourcePath, Set<String> availableProperties) throws Exception {
 
 		List<ASTResult> results = new ArrayList<>();
-
 		File sourceDir = new File(sourcePath);
-
 		System.out.println("Scanning source directory: " + sourcePath);
+		Files.walk(sourceDir.toPath()).filter(path -> path.toString().endsWith(".java")).filter(path -> {
 
-		Files.walk(sourceDir.toPath()).filter(path -> path.toString().endsWith(".java")).forEach(path -> {
+			String fileName = path.getFileName().toString();
+
+			String fullPath = path.toString().toLowerCase();
+
+			// Ignore test classes
+			return !fileName.endsWith("Test.java") && !fileName.endsWith("Tests.java")
+					&& !fullPath.contains(File.separator + "test" + File.separator);
+		}).forEach(path -> {
 
 			try {
 
 				CompilationUnit cu = StaticJavaParser.parse(path);
 
-				cu.findAll(ClassOrInterfaceDeclaration.class)
-						.forEach(clazz -> results.add(analyzeClass(clazz, availableProperties)));
+				cu.findAll(ClassOrInterfaceDeclaration.class).forEach(clazz ->
+
+				results.add(analyzeClass(clazz, availableProperties)));
 
 			} catch (Exception e) {
 
 				System.out.println("Error parsing file: " + path);
+
 				e.printStackTrace();
 			}
-
 		});
-
 		System.out.println("AST Classes analyzed: " + results.size());
-
 		return results;
 	}
 
 	private ASTResult analyzeClass(ClassOrInterfaceDeclaration clazz, Set<String> availableProperties) {
 
 		ASTResult result = new ASTResult();
-
 		result.className = clazz.getNameAsString();
-
 		detectLayer(clazz, result);
-
 		boolean isSpringComponent = result.layer != null;
-
 		if (isSpringComponent) {
 			detectInjection(clazz, result);
 		}
 
 		analyzeMethods(clazz, result);
-
 		detectAnnotations(clazz, result);
-
 		detectCodeSmells(clazz, result);
-		
 		detectValueAnnotations(clazz, result, availableProperties);
-
 		return result;
 	}
 
-	/* Detect Spring Layers */
 
 	private void detectLayer(ClassOrInterfaceDeclaration clazz, ASTResult result) {
-
 		clazz.getAnnotations().forEach(annotation -> {
 
 			String name = annotation.getNameAsString();
-
 			switch (name) {
-
 			case "RestController":
+			case "Controller":
 				result.layer = "Controller";
 				break;
-
 			case "Service":
 				result.layer = "Service";
 				break;
-
 			case "Repository":
 				result.layer = "Repository";
 				break;
-
+			case "Configuration":
+				result.layer = "Configuration";
+				break;
 			case "Component":
 				result.layer = "Component";
 				break;
+			case "EnableScheduling":
+				result.layer = "Scheduler";
+				break;
+			case "FeignClient":
+				result.layer = "External Client";
+				break;
+			case "KafkaListener":
+				result.layer = "Messaging";
+				break;
+			case "Entity":
+				result.layer = "Entity";
+				break;
+			case "MappedSuperclass":
+				result.layer = "Entity";
+				break;
 			}
+		});
 
+		if (result.layer == null) {
+
+			String packageName = clazz.findCompilationUnit().flatMap(c -> c.getPackageDeclaration())
+					.map(p -> p.getNameAsString()).orElse("").toLowerCase();
+			if (packageName.contains(".controller")) {
+				result.layer = "Controller";
+			} else if (packageName.contains(".service")) {
+				result.layer = "Service";
+			} else if (packageName.contains(".repository")) {
+				result.layer = "Repository";
+			} else if (packageName.contains(".config")) {
+				result.layer = "Configuration";
+			} else if (packageName.contains(".dto")) {
+				result.layer = "DTO";
+			} else if (packageName.contains(".model") || packageName.contains(".entity")) {
+				result.layer = "Model";
+			}
+		}
+	}
+
+	private void detectValueAnnotations(ClassOrInterfaceDeclaration clazz, ASTResult result,
+			Set<String> availableProperties) {
+		boolean isSpringBean = result.layer != null;
+		clazz.findAll(FieldDeclaration.class).forEach(field -> {
+			field.getAnnotations().forEach(annotation -> {
+				if (annotation.getNameAsString().equals("Value")) {
+					String fieldName = field.getVariables().get(0).getNameAsString();
+					int line = annotation.getBegin().map(p -> p.line).orElse(-1);
+
+					/* CASE 1: NON-SPRING BEAN (MISUSE) */
+					if (!isSpringBean) {
+						result.valueMisuses.add(new ValueMisuse(result.className, fieldName, line));
+						System.out.println(
+								"⚠ @Value misuse: " + result.className + "." + fieldName + " (line " + line + ")");
+						return;
+					}
+
+					/* CASE 2: SPRING BEAN - VALIDATE PROPERTY */
+					String expression = annotation.toString();
+					String key = extractPropertyKey(expression);
+
+					if (key != null && !availableProperties.contains(key)) {
+						result.missingProperties.add(new MissingProperty(result.className, fieldName, line, key));
+						System.out.println("Missing @Value: " + result.className + "." + fieldName + " (line " + line
+								+ ") -> " + key);
+					}
+				}
+			});
+		});
+
+		/* Constructor params */
+
+		clazz.getConstructors().forEach(constructor -> {
+			constructor.getParameters().forEach(param -> {
+				param.getAnnotations().forEach(annotation -> {
+					if (annotation.getNameAsString().equals("Value")) {
+						int line = annotation.getBegin().map(p -> p.line).orElse(-1);
+						if (!isSpringBean) {
+							result.valueMisuses.add(new ValueMisuse(result.className, param.getNameAsString(), line));
+							return;
+						}
+
+						String expression = annotation.toString();
+						String key = extractPropertyKey(expression);
+						if (key != null && !availableProperties.contains(key)) {
+							result.missingProperties
+									.add(new MissingProperty(result.className, param.getNameAsString(), line, key));
+						}
+					}
+				});
+			});
 		});
 	}
 
-	private void detectValueAnnotations(ClassOrInterfaceDeclaration clazz,
-                                    ASTResult result,
-                                    Set<String> availableProperties) {
-
-    boolean isSpringBean = result.layer != null;
-
-    clazz.findAll(FieldDeclaration.class).forEach(field -> {
-
-        field.getAnnotations().forEach(annotation -> {
-
-            if (annotation.getNameAsString().equals("Value")) {
-
-                String fieldName = field.getVariables().get(0).getNameAsString();
-                int line = annotation.getBegin().map(p -> p.line).orElse(-1);
-
-                /* 🔥 CASE 1: NON-SPRING BEAN (MISUSE) */
-
-                if (!isSpringBean) {
-
-                    result.valueMisuses.add(
-                            new ValueMisuse(result.className, fieldName, line)
-                    );
-
-                    System.out.println("⚠ @Value misuse: "
-                            + result.className + "." + fieldName
-                            + " (line " + line + ")");
-
-                    return;
-                }
-
-                /* 🔥 CASE 2: SPRING BEAN → VALIDATE PROPERTY */
-
-                String expression = annotation.toString();
-                String key = extractPropertyKey(expression);
-
-                if (key != null && !availableProperties.contains(key)) {
-
-                    result.missingProperties.add(
-                            new MissingProperty(
-                                    result.className,
-                                    fieldName,
-                                    line,
-                                    key
-                            )
-                    );
-
-                    System.out.println("Missing @Value: "
-                            + result.className + "." + fieldName
-                            + " (line " + line + ") -> " + key);
-                }
-            }
-        });
-    });
-
-    /* Constructor params */
-
-    clazz.getConstructors().forEach(constructor -> {
-
-        constructor.getParameters().forEach(param -> {
-
-            param.getAnnotations().forEach(annotation -> {
-
-                if (annotation.getNameAsString().equals("Value")) {
-
-                    int line = annotation.getBegin().map(p -> p.line).orElse(-1);
-
-                    if (!isSpringBean) {
-
-                        result.valueMisuses.add(
-                                new ValueMisuse(
-                                        result.className,
-                                        param.getNameAsString(),
-                                        line
-                                )
-                        );
-
-                        return;
-                    }
-
-                    String expression = annotation.toString();
-                    String key = extractPropertyKey(expression);
-
-                    if (key != null && !availableProperties.contains(key)) {
-
-                        result.missingProperties.add(
-                                new MissingProperty(
-                                        result.className,
-                                        param.getNameAsString(),
-                                        line,
-                                        key
-                                )
-                        );
-                    }
-                }
-            });
-        });
-    });
-}
-	
-	
 	private String extractPropertyKey(String expression) {
 
-	    if (expression == null) return null;
+		if (expression == null)
+			return null;
 
-	    if (expression.contains("${") && expression.contains("}")) {
+		if (expression.contains("${") && expression.contains("}")) {
 
-	        int start = expression.indexOf("${") + 2;
-	        int end = expression.indexOf("}");
+			int start = expression.indexOf("${") + 2;
+			int end = expression.indexOf("}");
 
-	        String inner = expression.substring(start, end);
+			String inner = expression.substring(start, end);
 
-	        int colonIndex = inner.indexOf(":");
+			int colonIndex = inner.indexOf(":");
+			if (colonIndex != -1) {
+				return inner.substring(0, colonIndex);
+			}
 
-	        if (colonIndex != -1) {
-	            return inner.substring(0, colonIndex);
-	        }
-
-	        return inner;
-	    }
-
-	    return null;
+			return inner;
+		}
+		return null;
 	}
 
 	/* Injection Detection */
-
 	private void detectInjection(ClassOrInterfaceDeclaration clazz, ASTResult result) {
-
 		clazz.findAll(FieldDeclaration.class).forEach(field -> {
-
 			field.getAnnotations().forEach(annotation -> {
-
 				if (annotation.getNameAsString().equals("Autowired")) {
 					result.fieldInjection = true;
 				}
-
 			});
-
 		});
-
 		clazz.getConstructors().forEach(constructor -> {
-
 			if (constructor.getParameters().size() > 0) {
 				result.constructorInjection = true;
 			}
-
 		});
 	}
 
 	/* Method Analysis */
-
 	private void analyzeMethods(ClassOrInterfaceDeclaration clazz, ASTResult result) {
-
 		clazz.findAll(MethodDeclaration.class).forEach(method -> {
-
 			int complexity = method.findAll(IfStmt.class).size() + method.findAll(ForStmt.class).size()
 					+ method.findAll(WhileStmt.class).size() + method.findAll(SwitchStmt.class).size()
 					+ method.findAll(CatchClause.class).size() + 1;
-
 			result.methodComplexity.put(method.getNameAsString(), complexity);
-
 		});
 	}
 
 	/* Custom Annotation Processing */
-
 	private void detectAnnotations(ClassOrInterfaceDeclaration clazz, ASTResult result) {
-
 		clazz.findAll(AnnotationExpr.class).forEach(annotation -> {
-
 			result.annotations.add(annotation.getNameAsString());
-
 		});
 	}
 
 	/* Code Smell Detection */
-
 	private void detectCodeSmells(ClassOrInterfaceDeclaration clazz, ASTResult result) {
-
 		int methodCount = clazz.getMethods().size();
-
 		if (methodCount > 20) {
 			result.codeSmells.add("God Class (too many methods)");
 		}
-
 		result.methodComplexity.forEach((method, complexity) -> {
-
 			if (complexity > 10) {
 				result.codeSmells.add("High complexity method: " + method);
 			}
-
 		});
 
 		if (result.fieldInjection) {

@@ -14,7 +14,6 @@ public class AnalysisIssue {
     private String impact;
     private List<String> recommendations;
 
-    // Constructor
     public AnalysisIssue(String componentName, String issueType, String severity,
                          double instability, double abstractness, double distance,
                          String description, String impact, List<String> recommendations) {

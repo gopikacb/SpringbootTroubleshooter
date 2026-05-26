@@ -20,6 +20,10 @@ public class Violation {
         this.message = message;
     }
 
+	public Violation() {
+		// TODO Auto-generated constructor stub
+	}
+
 	public String getRuleName() {
 		return ruleName;
 	}

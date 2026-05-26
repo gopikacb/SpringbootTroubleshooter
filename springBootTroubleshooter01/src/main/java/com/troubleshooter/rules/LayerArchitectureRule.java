@@ -1,92 +1,170 @@
 package com.troubleshooter.rules;
 
-import com.tngtech.archunit.core.domain.JavaClasses;
-import com.tngtech.archunit.lang.ArchRule;
-import com.tngtech.archunit.lang.EvaluationResult;
-import com.troubleshooter.model.Violation;
-import com.troubleshooter.utils.ArchUnitUtils;
-
-import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
-
-//import java.util.ArrayList;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+
+import org.springframework.stereotype.Controller;
+import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.troubleshooter.model.Violation;
 
 public class LayerArchitectureRule implements ArchitectureRule {
-
-//	public void check(JavaClasses classes) {
-//
-//		var rule = layeredArchitecture().consideringOnlyDependenciesInLayers()
-//
-//				.layer("Controller").definedBy("..controller..").layer("Service").definedBy("..service..")
-//				.layer("Repository").definedBy("..repository..")
-//
-//				.whereLayer("Controller").mayOnlyAccessLayers("Service").whereLayer("Service")
-//				.mayOnlyAccessLayers("Repository").whereLayer("Repository").mayNotAccessAnyLayer();
-//
-////        EvaluationResult result = rule.evaluate(classes);
-//
-////        printReadable("Controller -> Repository violation", result);
-//
-//		runRule("Layered Architecture violation", "LAYER", rule, classes);
-//	}
 
 	@Override
 	public List<Violation> evaluate(JavaClasses classes) {
 
-		ArchRule rule = layeredArchitecture().consideringOnlyDependenciesInLayers().layer("Controller")
-				.definedBy("..controller..").layer("Service").definedBy("..service..").layer("Repository")
-				.definedBy("..repository..").whereLayer("Controller").mayOnlyAccessLayers("Service")
-				.whereLayer("Service").mayOnlyAccessLayers("Repository").whereLayer("Repository")
-				.mayNotAccessAnyLayer();
+		List<Violation> violations = new ArrayList<>();
 
-		EvaluationResult result = rule.evaluate(classes);
+		for (JavaClass sourceClass : classes) {
 
-		return ArchUnitUtils.mapViolations(result, "Layer Rule", "LAYER");
+			String sourceLayer = detectLayer(sourceClass);
+
+			if (sourceLayer == null) {
+				continue;
+			}
+
+			Set<JavaClass> dependencies = sourceClass.getDirectDependenciesFromSelf().stream()
+					.map(d -> d.getTargetClass()).filter(classes::contains)
+					.collect(java.util.stream.Collectors.toSet());
+
+			for (JavaClass targetClass : dependencies) {
+
+				// Ignore self dependency
+				if (sourceClass.equals(targetClass)) {
+					continue;
+				}
+
+				String targetLayer = detectLayer(targetClass);
+
+				if (targetLayer == null) {
+					continue;
+				}
+
+				boolean violation = isViolation(sourceLayer, targetLayer);
+
+				if (violation) {
+
+					Violation v = new Violation();
+
+					v.setRuleName("Layer Rule");
+
+					v.setRuleType("LAYER");
+
+					v.setClassName(sourceClass.getSimpleName());
+
+					v.setFieldName(sourceLayer);
+
+					v.setDependency(targetClass.getSimpleName() + " (" + targetLayer + ")");
+
+					v.setMessage("Follow defined layer boundaries. Avoid accessing restricted layers directly.");
+
+					violations.add(v);
+				}
+			}
+		}
+
+		return removeDuplicates(violations);
 	}
 
-	
+	/**
+	 * Detect layer using annotations first, then package fallback.
+	 */
+	private String detectLayer(JavaClass javaClass) {
 
-//	private void printReadable(String title, String ruleType, EvaluationResult result) {
-//
-//		if (!result.hasViolation()) {
-//			System.out.println("[PASS] " + title);
-//			return;
-//		}
-//
-//		System.out.println("\n[FAIL] " + title);
-//		System.out.println("--------------------------------------------------");
-//
-//		for (String detail : result.getFailureReport().getDetails()) {
-//
-//			String source = extractBetween(detail, "Field <", ">");
-//			String target = extractBetween(detail, "has type <", ">");
-//
-//			if (source == null || target == null) {
-//				System.out.println("Raw: " + detail);
-//				continue;
-//			}
-//
-//			String className = source.substring(0, source.lastIndexOf("."));
-//			String fieldName = source.substring(source.lastIndexOf(".") + 1);
-//
-//			String simpleClass = ArchUnitUtils.getSimpleName(className);
-//			String simpleTarget = ArchUnitUtils.getSimpleName(target);
-//
-//			System.out.println("Class:              " + simpleClass);
-//			System.out.println("Field:              " + fieldName);
-//			System.out.println("Illegal Dependency: " + simpleTarget);
-//			System.out.println();
-//		}
-//
-//		System.out.println("Suggested Fix:");
-//		System.out.println("  " + getSuggestion(ruleType));
-//		System.out.println("--------------------------------------------------\n");
-//	}
+		// -------------------------
+		// Annotation based
+		// -------------------------
 
-//	private void runRule(String title, String ruleType, ArchRule rule, JavaClasses classes) {
-//		EvaluationResult result = rule.evaluate(classes);
-//		printReadable(title, ruleType, result);
-//	}
+		if (javaClass.isAnnotatedWith(Controller.class) || javaClass.isAnnotatedWith(RestController.class)) {
 
-	
+			return "Controller";
+		}
+
+		if (javaClass.isAnnotatedWith(Service.class)) {
+
+			return "Service";
+		}
+
+		if (javaClass.isAnnotatedWith(Repository.class)) {
+
+			return "Repository";
+		}
+
+		// -------------------------
+		// Package fallback
+		// -------------------------
+
+		String packageName = javaClass.getPackageName().toLowerCase();
+
+		if (packageName.contains(".controller")) {
+
+			return "Controller";
+		}
+
+		if (packageName.contains(".service")) {
+
+			return "Service";
+		}
+
+		if (packageName.contains(".repository")) {
+
+			return "Repository";
+		}
+
+		if (packageName.contains(".dao")) {
+
+			return "Repository";
+		}
+
+		return null;
+	}
+
+	/**
+	 * Layer dependency rules
+	 */
+	private boolean isViolation(String sourceLayer, String targetLayer) {
+
+		switch (sourceLayer) {
+
+		case "Controller":
+
+			return !targetLayer.equals("Service");
+
+		case "Service":
+
+			return targetLayer.equals("Controller");
+
+		case "Repository":
+
+			return targetLayer.equals("Controller") || targetLayer.equals("Service");
+
+		default:
+			return false;
+		}
+	}
+
+	private List<Violation> removeDuplicates(List<Violation> violations) {
+
+		List<Violation> unique = new ArrayList<>();
+
+		List<String> seen = new ArrayList<>();
+
+		for (Violation violation : violations) {
+
+			String key = violation.getClassName() + "-" + violation.getDependency();
+
+			if (!seen.contains(key)) {
+
+				seen.add(key);
+				unique.add(violation);
+			}
+		}
+
+		return unique;
+	}
 }

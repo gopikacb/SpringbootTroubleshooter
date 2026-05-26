@@ -6,7 +6,7 @@ import com.troubleshooter.ast.ASTConsolePrinter;
 import com.troubleshooter.ast.ASTResult;
 import com.troubleshooter.config.PropertyLoader;
 import com.troubleshooter.engine.RuleEngine;
-import com.troubleshooter.rules.AnnotationLayerRule;
+//import com.troubleshooter.rules.AnnotationLayerRule;
 import com.troubleshooter.rules.LayerArchitectureRule;
 import com.troubleshooter.rules.CycleDependencyRule;
 import com.troubleshooter.report.ArchitectureReport;
@@ -27,131 +27,84 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-
 public class ArchitectureScannerCLI {
 
-    public static void main(String[] args) throws Exception {
+	public static void main(String[] args) throws Exception {
 
-        if (args.length == 0) {
-            System.out.println("Usage: java -jar tool.jar <base-package>");
-            return;
-        }
+		if (args.length == 0) {
+			System.out.println("Usage: java -jar tool.jar <base-package>");
+			return;
+		}
 
-        String projectPath = args[0];
+		String projectPath = args[0];
+		ArchitectureAnalyzer analyzer = new ArchitectureAnalyzer();
+		JavaClasses classes = analyzer.loadClassesFromPath(args[0]);
+		RuleEngine engine = new RuleEngine(Arrays.asList(new LayerArchitectureRule(), new CycleDependencyRule()
+//        		        ,new AnnotationLayerRule()
+		));
 
-        ArchitectureAnalyzer analyzer = new ArchitectureAnalyzer();
-
-        JavaClasses classes = analyzer.loadClassesFromPath(args[0]);
-        
-        RuleEngine engine = new RuleEngine(
-        		Arrays.asList(
-        		        new LayerArchitectureRule(),
-        		        new CycleDependencyRule(),
-        		        new AnnotationLayerRule()
-        		)
-        );
-
-        ArchitectureReport report = engine.execute(classes);
+		ArchitectureReport report = engine.execute(classes);
 
 //        report.printReport();
 
-        
-        // score -= violations * 5
-        int score = ArchitectureMetrics.calculateScore(report.getViolationCount());
+		// Customised Rule based Architecture score ==> score -= violations * 5
+//		int score = ArchitectureMetrics.calculateScore(report.getViolationCount());
+//		System.out.println("\n Rule based Architecture Score: " + score + "/100");
+		
+		
+		
+		PackageDependencyAnalyzer packageDependencyAnalyzer = new PackageDependencyAnalyzer();
+		Map<String, Set<String>> dependencies = packageDependencyAnalyzer.analyze(classes);
+		ComponentMetricsCalculator calculator = new ComponentMetricsCalculator();
+		
+		List<ComponentMetrics> metrics = calculator.calculate(dependencies, classes);
+		
+		
+		System.out.println("\n------------------------------------------------------------------------------------------");
+		System.out.println("\nComponent Metrics (Robert C Martin)");
+		System.out.println("-------------------------------------------------------------");
+		System.out.printf("%-35s %-4s %-4s %-8s %-8s %-8s\n", "Component", "Ca", "Ce", "Instability", "Abstract","Distance");
+		for (ComponentMetrics m : metrics) {
+			System.out.printf("%-35s %-4d %-4d %-8.2f %-8.2f %-8.2f\n", m.getComponentName(), m.getAfferentCoupling(),
+					m.getEfferentCoupling(), m.getInstability(), m.getAbstractness(), m.getDistance());
+		}
 
-        System.out.println("\nArchitecture Score: " + score + "/100");
-        
-        
-        PackageDependencyAnalyzer packageDependencyAnalyzer = new PackageDependencyAnalyzer();
+		
+		
+		
+		System.out.println("\n------------------------------------------------------------------------------------------");
+		ArchitectureHealthCalculator healthCalculator = new ArchitectureHealthCalculator();
+		int healthScore = healthCalculator.calculateScore(metrics);
+		ArchitectureCommentGenerator commentAnalyzer = new ArchitectureCommentGenerator();
+		List<AnalysisIssue> issues = commentAnalyzer.analyze(metrics);
+		ArchitectureReportPrinter printer = new ArchitectureReportPrinter();
+		printer.print(issues, healthScore);
 
-        Map<String, Set<String>> dependencies =
-        		packageDependencyAnalyzer.analyze(classes);
+		System.out.println("\n--AST----------------------------------------------------------------------------------------");
 
-        ComponentMetricsCalculator calculator =
-                new ComponentMetricsCalculator();
+		ASTAnalyzer astAnalyzer = new ASTAnalyzer();
 
-        List<ComponentMetrics> metrics =
-                calculator.calculate(dependencies, classes);
-        
-        System.out.println("\n------------------------------------------------------------------------------------------");
+		String classesPath = args[0];
 
-        
-        System.out.println("\nComponent Metrics (Robert C Martin)");
-        System.out.println("-------------------------------------------------------------");
-        System.out.printf("%-35s %-4s %-4s %-8s %-8s %-8s\n",
-                "Component", "Ca", "Ce", "Instability", "Abstract", "Distance");
+		String sourceCodePath = classesPath.replace("target/classes", "src/main/java").replace("target\\classes",
+				"src\\main\\java");
 
-        for (ComponentMetrics m : metrics) {
+		System.out.println("Source path detected: " + sourceCodePath);
 
-            System.out.printf("%-35s %-4d %-4d %-8.2f %-8.2f %-8.2f\n",
-                    m.getComponentName(),
-                    m.getAfferentCoupling(),
-                    m.getEfferentCoupling(),
-                    m.getInstability(),
-                    m.getAbstractness(),
-                    m.getDistance());
-        }
-        
-        
-        /* ---------- New Architecture Analysis ---------- */
-        
-        System.out.println("\n------------------------------------------------------------------------------------------");
+		Set<String> properties = PropertyLoader.loadProperties(projectPath + "/src/main/resources");
 
+		List<ASTResult> astResults = astAnalyzer.analyzeSource(sourceCodePath, properties);
 
-        ArchitectureHealthCalculator healthCalculator =
-                new ArchitectureHealthCalculator();
+		ASTConsolePrinter astPrinter = new ASTConsolePrinter();
 
-        int healthScore = healthCalculator.calculateScore(metrics);
+		astPrinter.printResults(astResults);
 
+		ArchitectureHealthCalculator health = new ArchitectureHealthCalculator();
 
-        
-        
-        ArchitectureCommentGenerator commentAnalyzer = new ArchitectureCommentGenerator();
-        List<AnalysisIssue> issues = commentAnalyzer.analyze(metrics);
+		int astScore = health.calculateScore(metrics);
 
-        ArchitectureReportPrinter printer = new ArchitectureReportPrinter();
-        printer.print(issues, healthScore);
-        
-        
-        
-        System.out.println("\n--AST----------------------------------------------------------------------------------------");
+		HtmlReportGenerator reportHtml = new HtmlReportGenerator();
 
-        
-        
-        ASTAnalyzer astAnalyzer = new ASTAnalyzer();
-        
-        
-        String classesPath = args[0];
-
-        String sourceCodePath = classesPath
-                .replace("target/classes", "src/main/java")
-                .replace("target\\classes", "src\\main\\java");
-
-
-        System.out.println("Source path detected: " + sourceCodePath);
-        
-        Set<String> properties =
-                PropertyLoader.loadProperties(projectPath + "/src/main/resources");
-
-        List<ASTResult> astResults =
-                astAnalyzer.analyzeSource(sourceCodePath, properties);
-
-        ASTConsolePrinter astPrinter = new ASTConsolePrinter();
-
-        astPrinter.printResults(astResults);
-        
-        ArchitectureHealthCalculator health =
-                new ArchitectureHealthCalculator();
-
-        int astScore = health.calculateScore(metrics);
-                
-       
-        
-
-        HtmlReportGenerator reportHtml =
-                new HtmlReportGenerator();
-
-        reportHtml.generateReport(metrics, astResults,issues, astScore);
-
-    }
+		reportHtml.generateReport(metrics, astResults, issues, report, astScore);
+	}
 }
